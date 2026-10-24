@@ -17,13 +17,13 @@ function mockRpc(table) {
   return rpc;
 }
 
-test("readAddressBalance calls eth_getBalance and eth_blockNumber and shapes the result", async () => {
+test("readAddressBalance receives exact numeric block state rather than concurrent latest data", async () => {
   const rpc = mockRpc({ eth_getBalance: "0xde0b6b3a7640000", eth_blockNumber: "0x64" });
   const result = await readAddressBalance({ rpcUrl: RPC_URL, address: ADDRESS, rpc });
   assert.deepEqual(result, { address: ADDRESS.toLowerCase(), weiBalance: "1000000000000000000", snapshotBlock: "100" });
-  assert.equal(rpc.calls.length, 2);
-  assert.deepEqual(rpc.calls[0], { url: RPC_URL, method: "eth_getBalance", params: [ADDRESS.toLowerCase(), "latest"] });
-  assert.deepEqual(rpc.calls[1], { url: RPC_URL, method: "eth_blockNumber", params: [] });
+  assert.equal(rpc.calls.length, 2, "preserve the original two-request RPC resource budget");
+  assert.deepEqual(rpc.calls[0], { url: RPC_URL, method: "eth_blockNumber", params: [] });
+  assert.deepEqual(rpc.calls[1], { url: RPC_URL, method: "eth_getBalance", params: [ADDRESS.toLowerCase(), "0x64"] });
 });
 
 test("readAddressBalance rejects a malformed address without calling the RPC", async () => {
@@ -35,6 +35,70 @@ test("readAddressBalance rejects a malformed address without calling the RPC", a
 test("readAddressBalance rejects a missing address", async () => {
   const rpc = mockRpc({});
   await assert.rejects(() => readAddressBalance({ rpcUrl: RPC_URL, address: null, rpc }), /EVM address/);
+});
+
+
+test("a chain advancing between calls cannot mislabel a newer latest balance with an older height", async () => {
+  const calls = [];
+  let tip = "0x64";
+  const rpc = async (_url, method, params) => {
+    calls.push({method, params});
+    if (method === "eth_blockNumber") {const observed=tip;tip="0x65";return observed;}
+    if (method === "eth_getBalance") {
+      assert.equal(params[1], "0x64", "the second call must select the originally observed block");
+      return "0x0";
+    }
+    throw Error("unexpected method");
+  };
+  const result = await readAddressBalance({address:ADDRESS,rpc});
+  assert.deepEqual(result, {address:ADDRESS.toLowerCase(),weiBalance:"0",snapshotBlock:"100"});
+  assert.deepEqual(calls.map(x=>x.method),["eth_blockNumber","eth_getBalance"]);
+  assert.equal(tip,"0x65","the chain genuinely advanced, but the advertised balance did not");
+});
+
+test("provider historical-state refusal must fail closed, with no retry at latest", async () => {
+  const methods=[];
+  const rpc=async (_url,method,params)=>{
+    methods.push([method,params]);
+    if(method==="eth_blockNumber")return "0x64";
+    throw new Error("historical state unavailable");
+  };
+  await assert.rejects(()=>readAddressBalance({address:ADDRESS,rpc}),/historical state unavailable/u);
+  assert.deepEqual(methods,[
+    ["eth_blockNumber",[]],
+    ["eth_getBalance",[ADDRESS.toLowerCase(),"0x64"]]
+  ]);
+});
+
+test("malformed RPC quantities refuse before falsely attributed payment output", async () => {
+  for(const malformed of ["latest","0x","0x00","-1",101,null,{}, "0x10.2"]) {
+    const calls=[];
+    const rpc=async (_url,method)=>{
+      calls.push(method);
+      if(method==="eth_blockNumber")return malformed;
+      return "0xde0b6b3a7640000";
+    };
+    await assert.rejects(()=>readAddressBalance({address:ADDRESS,rpc}),/invalid exact block quantity/u,
+      "incorrect RPC block marker accepted: "+String(malformed));
+    assert.deepEqual(calls,["eth_blockNumber"],"do not request paid data with an invalid source block");
+  }
+  const rpc=async (_url,method)=>method==="eth_blockNumber"?"0x64":"1000000000000000000";
+  await assert.rejects(()=>readAddressBalance({address:ADDRESS,rpc}),/invalid exact balance quantity/u);
+});
+
+test("large exact block identifiers preserve BigInt precision without rounding timestamps or heights",async()=>{
+  const hex="0x10000000000012345";
+  const seen=[];
+  const rpc=async (_url,method,params)=>{
+    seen.push({method,params});
+    if(method==="eth_blockNumber")return hex;
+    if(method==="eth_getBalance")return "0xffffffffffffffffffffffff";
+    throw Error("unexpected method");
+  };
+  const result=await readAddressBalance({address:ADDRESS,rpc});
+  assert.equal(result.snapshotBlock,BigInt(hex).toString());
+  assert.equal(result.weiBalance,BigInt("0xffffffffffffffffffffffff").toString());
+  assert.equal(seen[1].params[1],hex);
 });
 
 test("readGasOracle calls eth_gasPrice and eth_blockNumber and shapes the result", async () => {
