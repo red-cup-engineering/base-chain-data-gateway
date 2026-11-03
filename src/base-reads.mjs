@@ -21,7 +21,10 @@ function requireHash(value) {
 
 /**
  * Read one address's native ETH balance and the snapshot block it was read
- * at, from a keyless public Base JSON-RPC endpoint. `rpcUrl` defaults to the
+ * at, from a keyless public Base JSON-RPC endpoint. The height is
+ * read first and the balance is then requested at that exact numeric block.
+ * This binds balance to height without promising finality or resistance to
+ * chain reorganization. `rpcUrl` defaults to the
  * package's own public Base mainnet endpoint, so this is directly callable
  * with just `{address}` (the shape a market's request query already is).
  * @param {{rpcUrl?: string, address: string, rpc?: typeof jsonRpc}} args
@@ -29,14 +32,23 @@ function requireHash(value) {
  */
 export async function readAddressBalance({ rpcUrl = DEFAULT_BASE_RPC_URL, address, rpc = jsonRpc }) {
   const account = requireAddress(address);
-  const [balance, blockNumber] = await Promise.all([
-    rpc(rpcUrl, "eth_getBalance", [account, "latest"]),
-    rpc(rpcUrl, "eth_blockNumber", []),
-  ]);
+  // The original concurrent latest-balance and height read could combine
+  // different blocks. A paid buyer needs one exact balance/height pair.
+  // Acquire the witnessed height first, then query state AT that block;
+  // never silently fall back to "latest" on an RPC historical-state refusal.
+  const blockNumber = await rpc(rpcUrl, "eth_blockNumber", []);
+  if (typeof blockNumber !== "string" ||
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(blockNumber))
+    throw new TypeError("Base RPC returned an invalid exact block quantity");
+  const block = BigInt(blockNumber);
+  const balance = await rpc(rpcUrl, "eth_getBalance", [account, "0x" + block.toString(16)]);
+  if (typeof balance !== "string" ||
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(balance))
+    throw new TypeError("Base RPC returned an invalid exact balance quantity");
   return {
     address: account,
     weiBalance: BigInt(balance).toString(),
-    snapshotBlock: BigInt(blockNumber).toString(),
+    snapshotBlock: block.toString(),
   };
 }
 

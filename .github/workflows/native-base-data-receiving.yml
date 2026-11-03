@@ -1,0 +1,81 @@
+name: Base chain data source and published-carrier receiving
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "package.json"
+      - "README.md"
+      - ".github/workflows/native-base-data-receiving.yml"
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: base-data-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-source-and-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Select original source without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Run Node 24 native original consumer contract
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24"
+      - name: Resolve original exact dependency and run every native source test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock --registry=https://registry.561.group/
+          npm run check
+          npm test
+      - name: Qualify actual packed original module in a clean independent buyer consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/base-package.json"
+          tarball="$(node -e 'const p=require(process.argv[1]);if(p.length!==1||typeof p[0]?.filename!=="string")process.exit(2);process.stdout.write(p[0].filename)' "$RUNNER_TEMP/base-package.json")"
+          tar -tzf "$RUNNER_TEMP/$tarball" > "$RUNNER_TEMP/base-members.txt"
+          grep -Fx "package/src/base-reads.mjs" "$RUNNER_TEMP/base-members.txt"
+          grep -Fx "package/src/network-constants.mjs" "$RUNNER_TEMP/base-members.txt"
+          mkdir -p "$RUNNER_TEMP/clean-consumer"
+          cd "$RUNNER_TEMP/clean-consumer"
+          npm init -y >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock --registry=https://registry.561.group/ "$RUNNER_TEMP/$tarball"
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import {readAddressBalance, readGasOracle} from "@red-cup-engineering/base-chain-data-gateway/base-reads";
+          const address="0x4200000000000000000000000000000000000006";
+          const methods=[];
+          const rpc=async (_url,method,params)=>{
+            methods.push([method,params]);
+            if(method==="eth_blockNumber")return "0x64";
+            if(method==="eth_getBalance"){
+              assert.equal(params[1],"0x64");
+              return "0x2a";
+            }
+            if(method==="eth_gasPrice")return "0x3b9aca00";
+            throw new Error("unexpected provider method");
+          };
+          const result=await readAddressBalance({address,rpc});
+          assert.deepEqual(result,{address:address.toLowerCase(),weiBalance:"42",snapshotBlock:"100"});
+          assert.deepEqual(methods.map(([name])=>name),["eth_blockNumber","eth_getBalance"]);
+          const gas=await readGasOracle({rpc});
+          assert.equal(gas.weiGasPrice,"1000000000");
+          assert.equal(gas.snapshotBlock,"100");
+          const refuting=async (_url,method)=>method==="eth_blockNumber"?"0x64":Promise.reject(new Error("exact block unavailable"));
+          await assert.rejects(readAddressBalance({address,rpc:refuting}),/exact block unavailable/u);
+          process.stdout.write("Original packed Base balance and gas consumer received; wrong-history source refused\n");
+          NODE
