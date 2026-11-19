@@ -1,0 +1,151 @@
+# Base chain-data gateway
+
+<!-- 561-group-standards:badges:start -->
+[![Red Cup Engineering](https://img.shields.io/badge/561%20Group-Red%20Cup%20Engineering-c0392b)](https://github.com/red-cup-engineering)
+[![License: MIT](https://img.shields.io/badge/license-MIT-c0392b)](LICENSE)
+[![Indigenous data: CARE](https://img.shields.io/badge/Indigenous%20data-CARE-4b6f44)](https://github.com/red-cup-engineering/.github/blob/main/GOVERNANCE.md)
+[![Tips welcome](https://img.shields.io/badge/tips-welcome-d4a017)](https://github.com/561-group/.github/blob/main/TIPS.md)
+<!-- 561-group-standards:badges:end -->
+
+Three keyless-public-RPC Base network chain-data reads, owned here as pure operations and sold by the call through the one market, market.
+561.group (`@red-cup-engineering/market-561-group`):
+
+- `readAddressBalance({ address })` -- native ETH balance (`eth_getBalance`).
+- `readGasOracle()` -- current network gas price (`eth_gasPrice`).
+- `readTransactionByHash({ hash })` -- one transaction by hash (`eth_getTransactionByHash`).
+
+**Paid address-balance result integrity.** The original `readAddressBalance`
+now reads `eth_blockNumber` first and then requests `eth_getBalance` at
+that **exact hexadecimal block number**. Its `snapshotBlock` and
+`weiBalance` therefore name the same selected block, rather than racing two
+`latest` reads as before. It keeps the original **two RPC requests**,
+refuses malformed numbers and historical-state refusals without falling
+back to `latest`, and adds no wallet, payment rail, extra endpoint or source
+copy. The two network calls are now **sequential**, so same-job latency may be
+higher even though request count is unchanged. An explicit block number is
+not an authenticated canonical block hash or finality proof; chain reorgs
+and external RPC source authority remain independent responsibilities.
+
+**Gas oracle precision.** The distinct `readGasOracle` result reports the
+current node's `eth_gasPrice` estimate and an associated observed
+`eth_blockNumber`. Ethereum JSON-RPC `eth_gasPrice` does **not** take a
+block parameter, so `snapshotBlock` on this *gas estimate* does not
+certify that the estimate was computed from that exact block. Do not
+market it as a block-pinned gas oracle or an independently audited
+low-latency feed.
+
+**Real earning boundary.** The upstream 561 Market still owns declared
+`/v1/base-chain/balance` and `/v1/base-chain/gas-oracle` prices,
+merchant/payee identity, independent payable x402, external distributor
+and signed customer receipt. This service's MIT source, test results or
+a qualified packed consumer do **not** establish that Market's source
+rights, public installed offer, positive after-fee contribution or paid
+delivery. Original merchant receiving:
+https://github.com/causeway-services/market.561.group/issues/4 .
+
+
+Each read is proxied from a free, keyless public Base JSON-RPC endpoint (`rpcUrl`, default `https://mainnet.base.org`); no paid RPC provider is used.
+This package carries no transport, payment boundary, domain, or runner of its own: the market's catalog names these exports as its `base-chain` offers (`GET /v1/base-chain/balance`, `/v1/base-chain/gas-oracle`, `/v1/base-chain/transaction`, at $0.001, $0.001, and $0.002) and the market prices, admits, settles, and witnesses them.
+The Cloudflare Worker, its `wrangler.toml`, and the base-chain.
+561.group origin were retired on the Founder's 2026-09-11 one-market ruling; the prior 402index listing is kept under the market app's `data/records/legacy/base-chain-data-gateway/`.
+
+## From the copy in red-cup-engineering/ethereum-engineering-services-section
+
+An x402 v2 seller for three keyless-public-RPC Base network chain-data
+reads, deployed as one Cloudflare Worker:
+
+- `GET /base/balance?address=0x...` -- native ETH balance (`eth_getBalance`).
+- `GET /base/gas-oracle` -- current network gas price (`eth_gasPrice`).
+- `GET /base/transaction?hash=0x...` -- one transaction by hash (`eth_getTransactionByHash`).
+- `GET /healthz` -- unpriced liveness check.
+
+Each read is proxied from a free, keyless public Base JSON-RPC endpoint
+(`BASE_RPC_URL`, default `https://mainnet.base.org`); no paid RPC provider
+is used. The HTTP payment boundary is the official `@x402/*` SDK reached
+through `@red-cup-engineering/x402-services-section`'s `./fetch` export
+(`createExactEvmFetchPaymentBoundary`), the transport built specifically
+for a stateless fetch-handler host such as Cloudflare Workers -- the same
+protocol core the Group's Express-based sellers
+(`metered-inference-tollbooth`, `paid-ephemeris-gateway`) use, with no
+Express dependency.
+
+## Configuration
+
+Every settlement-affecting value is deployment-supplied (`wrangler.toml`
+`[vars]` for public values, `wrangler secret put` for anything sensitive),
+never hardcoded in `src/`, matching the env-var convention already live in
+`metered-inference-tollbooth` and `paid-ephemeris-gateway`:
+
+- `X402_NETWORK`: explicit EVM CAIP-2 chain. Default `eip155:84532` (Base
+  Sepolia testnet). The live deployment sets `eip155:8453` for Base mainnet
+  production.
+- `X402_PAY_TO`: this deployment's receiving EVM address. **Required, no
+  default** -- deciding which wallet receives real settlement is an owner
+  custody decision, never inferred or invented by this package.
+- `X402_ASSET`: the settlement asset's EVM address. Defaults to Circle's
+  official USDC contract for the selected network (Base mainnet
+  `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, Base Sepolia
+  `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, verified against
+  developers.circle.com/stablecoins/usdc-contract-addresses).
+- `X402_FACILITATOR`: contracted x402 facilitator URL. Defaults to
+  Coinbase's free, keyless public facilitator
+  (`https://x402.org/facilitator`), which supports `eip155:84532` but
+  **not** `eip155:8453` (its own `GET /supported` names which networks it
+  serves). The mainnet deployment sets this
+  explicitly to `https://facilitator.payai.network` -- a free, keyless
+  third-party facilitator, protocol-assayed (schema-valid `/supported`
+  declaring Base-mainnet `exact`, structured protocol-conformant refusal
+  of malformed `/verify`/`/settle` payloads, and refusal of a
+  recipient-mismatched probe) by
+  `x402-services-section/scripts/assay-x402-facilitator.mjs`. No Coinbase
+  CDP account or credentials are required.
+- `BASE_RPC_URL`: the read RPC endpoint. Default `https://mainnet.base.org`
+  (free, keyless). Reads are independent of `X402_NETWORK`.
+- `X402_BALANCE_PRICE_ATOMIC`, `X402_GAS_ORACLE_PRICE_ATOMIC`,
+  `X402_TRANSACTION_PRICE_ATOMIC`: per-route price in the asset's atomic
+  units. Defaults `1000` / `1000` / `2000` (USDC has 6 decimals, so
+  $0.001 / $0.001 / $0.002), matching the 402index.io comparables (Base
+  Gas Oracle $0.0010/call, Base Transaction Check $0.0020/call).
+
+## Base-mainnet settlement
+
+This worker deploys to the custom domain
+`base-chain.561.group` on Base mainnet (`eip155:8453`), settling through
+`https://facilitator.payai.network` -- a free, keyless third-party
+facilitator requiring no Coinbase CDP account -- to `X402_PAY_TO` (a
+`wrangler secret put` value, an owner-custodied mainnet address; see the
+`x402.payto-decision` record in `x402-services-section/data/logs/2026/09/01/`).
+It is listed on [402index.io](https://402index.io/) (`chain-data` category).
+Whether the deployed routes are actually answering, and what a probe of them
+returns, is checked live with `wrangler`/`curl` against
+`base-chain.561.group`, per the `whats-live` skill, never asserted here.
+
+`wrangler.toml` binds only the `base-chain.561.group` custom-domain
+route and declares no `workers_dev` binding, so the
+`base-chain-data-gateway.morgan-sennhauser.workers.dev` host carries no
+route for this worker; the custom domain is the only host this worker's
+configuration serves.
+
+`X402_NETWORK=eip155:84532` (Base Sepolia testnet) remains the package
+default for local development and testing; production sets it explicitly
+to `eip155:8453`.
+
+## Tests
+
+`npm test` runs `node --test` over the handler logic (route dispatch,
+input validation, response shaping) with the RPC call mocked -- no
+network access required.
+
+## Thread
+
+Five-custody thread (org-layering.md, 2026-09-01):
+- science: [ethereum-services-section](../../../../../../../../../../../science-services-section/services/engineering-science-services-section/services/computer-science-services-section/services/blockchain-services-section/services/ethereum-services-section) — `content/text/glossary/terms/ethereum-virtual-machine.md` grounds Base (an EVM L2) as the machine model this gateway reads chain data from.
+- engineering: **this section itself** — `src/base-reads.mjs` and `src/worker.mjs`, composed from `@red-cup-engineering/ethereum-services-section` (`public-evm-ledger`'s `jsonRpc`) and `@red-cup-engineering/x402-services-section` (`./fetch`'s `createExactEvmFetchPaymentBoundary`), both consumed as exact-pinned registry dependencies, with no hand-rolled JSON-RPC or payment-boundary code in this package.
+- operations: [capability-market-operations-services-section](../../../../../../../../../../../operations-services-section/services/union-services-section/services/union-market-services-section/services/capability-market-operations-services-section) — names `x402-services-section` explicitly as the priced HTTP boundary/settlement leg of the Union's `RMN demand -> ... -> x402 clearing -> ...` capability-market pipeline this gateway's sales flow through.
+- 561-group: [bare-cedar-fog-cloudflare-services-section](../../../../../../../../../../../561-group-services-section/services/561-group-computer-services-section/services/561-group-persistent-computer-machine-services-section/services/bare-cedar-fog-services-section/services/bare-cedar-fog-web-services-section/bare-cedar-fog-cloudflare-services-section) — the Cloudflare account custody this Worker deploys under (custom domain `base-chain.561.group`, Base mainnet).
+- public: [public-blockchain-systems-services-section](../../../../../../../../../../../public-services-section/services/public-computer-services-section/services/public-blockchain-systems-services-section) — the Group's general public blockchain custody (alongside `blockchain-trashpanda-services-section`); this product's public face is external, on [402index.io](https://402index.io/) (`chain-data` category, see this section's own `402index-listing.json`), named as a debt to eventually mirror into public custody rather than invented as a full link here.
+
+## Entanglement debts
+
+- public custody debt (above): this gateway's 402index.io listing has no
+  mirror inside `public-blockchain-systems-services-section`.

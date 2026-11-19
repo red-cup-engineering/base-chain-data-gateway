@@ -1,0 +1,36 @@
+{
+  "name": "@red-cup-engineering/base-chain-data-gateway",
+  "version": "0.2.6-dev.0",
+  "private": false,
+  "type": "module",
+  "description": "Three keyless-public-RPC Base network chain-data reads: address balance, gas oracle, and transaction-by-hash. Sold as offers in the catalog of market.561.group (@red-cup-engineering/market-561-group); this package owns only the pure reads, no transport of its own.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/red-cup-engineering/base-chain-data-gateway.git"
+  },
+  "main": "src/base-reads.mjs",
+  "exports": {
+    ".": "./src/base-reads.mjs",
+    "./base-reads": "./src/base-reads.mjs"
+  },
+  "files": [
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "check": "node --check src/base-reads.mjs"
+  },
+  "dependencies": {
+    "@red-cup-engineering/ethereum-engineering-services-section": "^0.15.2"
+  },
+  "license": "MIT",
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/561-group/.github/blob/main/TIPS.md"
+  }
+}
